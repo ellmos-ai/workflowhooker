@@ -69,6 +69,28 @@ Pfadmuster: `ordner/` oder `ordner/**` (Ordner samt Inhalt), ein genauer relativ
 (ein Muster ohne `/` trifft auch den Dateinamen in jedem Ordner); Groß-/Kleinschreibung wird ignoriert. Shell-Befehle
 (`Bash`, `PowerShell`) werden nicht geprüft: Die Pfadregeln sind eine Leitplanke gegen Bearbeitungen, keine Sandbox.
 
+Muster mit `/` sind an der Projektwurzel verankert: `vendor/` schützt `<Projekt>/vendor/` samt Inhalt, **nicht**
+`src/vendor/`. Jeden gemeinten Ordner einzeln auflisten (`protected = ["vendor/", "src/vendor/"]`). `**` hat keine
+rekursive Bedeutung (verglichen wird per `fnmatch` auf den relativen Pfad), `**/vendor/` ist also kein Ausweg. Nur
+Muster ohne `/` (z. B. `*.lock`, `.env`) treffen den Dateinamen in jedem Ordner. Gewählt wurde die Dokumentation statt
+Glob-Unterstützung: Es ist der bestehende, vorhersehbare Vertrag, eine Zeile mehr pro Ordner ist billig, und ein still
+zu weit treffender Glob würde aus der Leitplanke eine Überraschungs-Sperre machen.
+
+### Was fail-open ist, was ablehnt
+
+Der Scope-Guard ist eine Leitplanke, keine Sicherheitsgrenze, und keine Sperre darf den Nutzer zum Lösen brauchen:
+
+- **Fail-open mit sichtbarem Hinweis (`systemMessage`)**: Die Konfiguration ist nicht ladbar (TOML-Syntaxfehler,
+  ungültiger Wert wie `ownership`), die Hook-Payload ist unlesbar oder der Zielpfad nicht bestimmbar. Die Änderung
+  läuft weiter; die Meldung nennt Datei und Ursache und sagt, dass die Guards bis zur Reparatur der Konfiguration
+  inaktiv sind. Sie wiederholt sich bei jeder Änderung bis dahin.
+- **Immer bearbeitbar**: die `workflowhooker.toml` selbst, auch wenn `allowed` sie nicht nennt.
+- **Lehnt weiter ab**: eine Änderung, die eine lesbare `protected`-/`allowed`-Regel trifft (die Begründung geht an das
+  Modell), und - nur bei aktiviertem `[action_guard]` mit lesbarer Konfiguration - ein fremder harter Lock oder eine
+  unlesbare Payload an diesem Opt-in-Guard.
+- Das Stop-Gate blockiert höchstens einmal; lief keine Runde (nur fremder oder ungeklärter Stand), sagt die Meldung
+  „Verbleibende Befunde (keine Nacharbeitsrunde ausgelöst)“ statt eine Runde zu behaupten.
+
 `ownership = "lock"` (Standard) akzeptiert als Eigentumsbeleg für das Abschluss-Gate nur einen eigenen Lock mit voller
 Identität. `ownership = "session"` nimmt zusätzlich beim ersten `UserPromptSubmit`, `SessionStart` oder `PreToolUse`
 einer Sitzung eine Basislinie auf (relative Pfade der uncommitteten Dateien plus Inhalts-Hash) und wertet beim Stop
@@ -112,8 +134,8 @@ Sicherheitsgrenze.
 Das interne Resultatmodell trennt Aktionsguard, Kontext, Stop und Nebenwirkung.
 Der Belegzustand ist `clean`, `finding` oder `unknown`; anwendbare Entscheide
 werden als `deny > ask > allow` zusammengeführt. Ein technischer Ausfall eines
-aktivierten harten Guards ergibt `unknown + deny` ausschließlich für die
-betroffene Aktion. Fehler eines Hinweises oder Kontextchecks sperren normale,
+aktivierten harten Aktionsguards (lesbare Konfiguration) ergibt `unknown + deny` ausschließlich für die
+betroffene Aktion; eine unlesbare Konfiguration oder Scope-Guard-Payload ist fail-open mit sichtbarem Hinweis (siehe oben). Fehler eines Hinweises oder Kontextchecks sperren normale,
 bereits autorisierte Arbeit nicht global.
 
 Das optionale Abschluss-Gate korreliert Eigentümer, Scope, Host, Sitzung,

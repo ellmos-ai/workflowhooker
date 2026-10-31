@@ -118,12 +118,18 @@ def _path_matches(rel: str, pattern: str) -> bool:
 
 
 def evaluate_scope_paths(
-    payload: dict[str, Any], config: Config, project_dir: Path
+    payload: dict[str, Any],
+    config: Config,
+    project_dir: Path,
+    config_path: Path | str | None = None,
 ) -> GateResult | None:
     """Pfadregeln des ``scope_guard`` fuer PreToolUse; ``None`` = nicht zustaendig.
 
     Unabhaengig von Identitaet und Locks: ein geschuetzter oder ausserhalb von
     ``allowed`` liegender Pfad wird abgelehnt, die Begruendung geht an das Modell.
+    Die Konfigurationsdatei selbst ist immer bearbeitbar (sonst waere ein
+    ``allowed`` ohne sie ein Sperr-Zirkel). Kann das Ziel nicht bestimmt werden,
+    wird erlaubt und per Meldung sichtbar gemacht (Leitplanke, keine Sicherheitsgrenze).
     """
     rules = config.checks.scope_guard
     if "scope_guard" not in config.mode.checks or not (rules.protected or rules.allowed):
@@ -134,13 +140,19 @@ def evaluate_scope_paths(
     target_key = "pending-action"
     if extracted.malformed:
         return GateResult(
-            HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.UNKNOWN,
+            HookSurface.ACTION_GUARD, Decision.ALLOW, EvidenceState.UNKNOWN,
             "scope-target-unresolved",
-            "Dateiaktion gesperrt: Ziel konnte fuer die Scope-Pruefung nicht sicher bestimmt werden.",
+            "[WorkflowHooker] Scope-Guard fuer diese Dateiaktion uebersprungen: "
+            "Ziel konnte nicht sicher bestimmt werden.",
             target_key,
         )
     root = project_dir.resolve(strict=False)
+    own_config = {(root / "workflowhooker.toml")}
+    if config_path:
+        own_config.add(Path(config_path).resolve(strict=False))
     for target in extracted.targets:
+        if target in own_config:
+            continue
         try:
             rel = target.relative_to(root).as_posix()
         except ValueError:
@@ -386,6 +398,7 @@ def _completion_message(
     unknown: tuple[str, ...],
     *,
     residual: bool,
+    round_ran: bool | None = None,
 ) -> str:
     parts = []
     if own:
@@ -394,11 +407,14 @@ def _completion_message(
         parts.append("unangetastet lassen: " + "; ".join(foreign))
     if unknown:
         parts.append("unbekannt: " + "; ".join(unknown))
-    prefix = (
-        "[WorkflowHooker] Verbleibende Befunde nach einer Nacharbeitsrunde: "
-        if residual
-        else "[WorkflowHooker] Genau eine Nacharbeitsrunde erforderlich: "
-    )
+    if not residual:
+        prefix = "[WorkflowHooker] Genau eine Nacharbeitsrunde erforderlich: "
+    elif round_ran:
+        prefix = "[WorkflowHooker] Verbleibende Befunde nach einer Nacharbeitsrunde: "
+    elif round_ran is False:
+        prefix = "[WorkflowHooker] Verbleibende Befunde (keine Nacharbeitsrunde ausgeloest): "
+    else:
+        prefix = "[WorkflowHooker] Verbleibende Befunde: "
     hint = (
         ""
         if residual
@@ -474,6 +490,7 @@ def evaluate_stop_gate(
             _completion_message(own, foreign, unknown, residual=True),
             target_key,
         )
+    round_ran = (already_active or runtime.rounds_requested > 0) if state_reliable else None
     if not state_reliable or already_active:
         # Fail-safe gegen Schleifen: Ein verlorener Rundenbeleg oder der
         # Host-Nachweis einer bereits laufenden Fortsetzung gilt fuer dieses
@@ -534,6 +551,6 @@ def evaluate_stop_gate(
         Decision.ALLOW,
         evidence_state,
         "stop-residual",
-        _completion_message(own, foreign, unknown, residual=True),
+        _completion_message(own, foreign, unknown, residual=True, round_ran=round_ran),
         target_key,
     )

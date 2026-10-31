@@ -89,6 +89,28 @@ Path patterns: `dir/` or `dir/**` (a folder and everything below it), an exact r
 `*.lock` (a pattern without `/` also matches the file name in any folder); matching ignores case. Shell commands
 (`Bash`, `PowerShell`) are not inspected, so the path rules are a guard rail against edits, not a sandbox.
 
+Patterns with a `/` are anchored at the project root: `vendor/` protects `<project>/vendor/` and everything below
+it, but **not** `src/vendor/`. List every folder you mean (`protected = ["vendor/", "src/vendor/"]`). `**` has no
+recursive meaning (matching is `fnmatch` on the relative path), so `**/vendor/` is not a way around this. Only
+patterns without `/` (such as `*.lock` or `.env`) match the file name in any folder. Chosen over glob support
+because it is the existing, predictable contract and one extra line per folder is cheap; a silently
+over-matching glob would turn a guard rail into a surprise lock-out.
+
+### What fails open, what denies
+
+The scope guard is a guard rail, not a security boundary, and no lock may need the user to be lifted. So:
+
+- **Fail-open with a visible notice (`systemMessage`)**: the configuration cannot be loaded (TOML syntax error,
+  invalid value such as `ownership`), the hook payload is unreadable, or the target path cannot be determined.
+  The edit goes ahead; the message names the file and the cause and says the guards are inactive until the
+  configuration is repaired. It repeats on every edit until then.
+- **Always editable**: `workflowhooker.toml` itself, even when `allowed` does not list it.
+- **Still denies**: an edit that a readable `protected` / `allowed` rule matches (the reason reaches the model),
+  and - only if you enabled `[action_guard]` and the configuration is readable - a foreign hard lock or an
+  unreadable payload on that opt-in guard.
+- The Stop gate never blocks more than one round; when no round was triggered (only foreign or unclear state),
+  the message says "remaining findings (no rework round triggered)" instead of claiming a round ran.
+
 Without a configuration file, `checks` is empty and the program emits no
 workflow warnings.
 
@@ -134,7 +156,8 @@ the guard is therefore defense in depth, not the sole security boundary.
 Internally, results retain separate surfaces for action guards, context,
 stopping, and side effects. Evidence is `clean`, `finding`, or `unknown`, and
 applicable decisions combine as `deny > ask > allow`. A technical failure on
-an enabled hard guard is `unknown + deny` for that one matched action. An
+an enabled hard action guard (readable configuration) is `unknown + deny` for that one matched action;
+an unreadable configuration or scope-guard payload fails open with a visible notice (see above). An
 advisory/context failure does not globally stop otherwise authorized work.
 
 The optional stop gate correlates owner, scope, host, session, configured

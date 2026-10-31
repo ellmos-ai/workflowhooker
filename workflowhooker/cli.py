@@ -330,22 +330,22 @@ def _cmd_hook_run(args) -> int:
 
     try:
         config = load_config(args.config)
-    except (OSError, UnicodeError, ValueError, TypeError):
-        # Ein Konfigurationsdefekt darf Hinweise ausfallen lassen, aber keine
-        # als kritisch gematchte Dateiaktion still freigeben. Da die Config
-        # selbst unlesbar ist, gilt die konservative eingebaute Kanalliste.
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        # Fail-open mit sichtbarem Hinweis (0.3.1): Eine kaputte Konfiguration
+        # darf nie jede Dateiaenderung sperren -- auch nicht die Reparatur der
+        # workflowhooker.toml selbst. Ohne lesbare Konfiguration gibt es keine
+        # greifenden protected/allowed-Regeln, die abzulehnen waeren.
+        detail = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
+        notice = (
+            f"[WorkflowHooker] Konfiguration '{args.config}' nicht ladbar ({detail}). "
+            "Scope-Guard und Action-Guard sind inaktiv, bis die Datei repariert ist; "
+            "Dateiaktionen werden bis dahin nicht geprueft."
+        )
         if args.event == "PreToolUse":
-            result = GateResult(
-                HookSurface.ACTION_GUARD,
-                Decision.DENY,
-                EvidenceState.UNKNOWN,
-                "config-unavailable",
-                "Kritische Dateiaktion gesperrt: Guard-Konfiguration nicht belastbar.",
-                "pending-action",
-            )
-            return _emit_action_result(result, args.provider)
+            return _emit_notice(notice, args.provider)
         print(
-            "[WorkflowHooker] Kontextprüfung nicht verfügbar (Konfigurationsfehler).",
+            f"[WorkflowHooker] Kontextprüfung nicht verfügbar (Konfigurationsfehler in "
+            f"'{args.config}': {detail}).",
             file=sys.stderr,
         )
         return 0
@@ -371,21 +371,25 @@ def _cmd_hook_run(args) -> int:
 
     if args.event == "PreToolUse":
         rules = config.checks.scope_guard
+        notice = None
         if "scope_guard" in config.mode.checks and (rules.protected or rules.allowed):
             # Pfadregeln gelten ohne Identitaet/Lock; Nicht-Zustaendigkeit = None.
             if not payload_reliable:
-                scope_result = GateResult(
-                    HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.UNKNOWN,
-                    "payload-unavailable",
-                    "Dateiaktion gesperrt: Hook-Payload fuer die Scope-Pruefung nicht belastbar.",
-                    "pending-action",
+                # Leitplanke, keine Sicherheitsgrenze: weiterarbeiten, aber sichtbar.
+                notice = (
+                    "[WorkflowHooker] Scope-Guard fuer diese Dateiaktion uebersprungen: "
+                    "Hook-Payload nicht lesbar."
                 )
             else:
-                scope_result = evaluate_scope_paths(payload, config, project_dir)
-            if scope_result is not None and scope_result.decision is not Decision.ALLOW:
-                return _emit_action_result(scope_result, args.provider)
+                scope_result = evaluate_scope_paths(
+                    payload, config, project_dir, config_path=args.config
+                )
+                if scope_result is not None:
+                    if scope_result.decision is not Decision.ALLOW:
+                        return _emit_action_result(scope_result, args.provider)
+                    notice = scope_result.message or None
         if not config.action_guard.enabled:
-            return 0
+            return _emit_notice(notice, args.provider)
         if not payload_reliable:
             result = GateResult(
                 HookSurface.ACTION_GUARD,
@@ -397,6 +401,8 @@ def _cmd_hook_run(args) -> int:
             )
         else:
             result = evaluate_action_guard(payload, config, project_dir)
+        if result.decision is Decision.ALLOW and notice:
+            return _emit_notice(notice, args.provider)
         return _emit_action_result(result, args.provider)
 
     # Ohne diese Zeile landen ALLE Sitzungen in session-default.json, und die
@@ -524,6 +530,18 @@ def _ensure_baseline(args, config: Config, payload: dict, project_dir: Path) -> 
             state.save(path)
     except (OSError, StateTransactionTimeout, StopRuntimeIntegrityError):
         return
+
+
+def _emit_notice(message: str | None, provider: str) -> int:
+    """Sichtbarer Hinweis ohne Entscheidung: die Aktion laeuft weiter (fail-open)."""
+
+    if not message:
+        return 0
+    if provider == "kimi":
+        print(message, file=sys.stderr)
+    else:
+        print(json.dumps({"systemMessage": message}, ensure_ascii=False))
+    return 0
 
 
 def _emit_action_result(result: GateResult, provider: str) -> int:

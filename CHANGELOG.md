@@ -4,6 +4,24 @@ All notable public changes are documented in this file.
 
 ## Unreleased
 
+### Fixed (0.3.1)
+
+- The PreToolUse scope guard no longer locks the project when its own configuration is broken. An unloadable
+  `workflowhooker.toml` (TOML syntax error, invalid `ownership`), an unreadable hook payload and an undeterminable
+  target now fail open: the edit goes ahead and a `systemMessage` names the file and the cause and says the guards are
+  inactive until the configuration is repaired. Before, every Edit/Write/MultiEdit/NotebookEdit was denied without
+  naming file or cause - including the edit that would repair the file. A readable `protected` / `allowed` rule still
+  denies, and the opt-in `[action_guard]` stays fail-closed on an unreadable payload.
+- `workflowhooker.toml` is always editable, even when `allowed` does not list it.
+- Stop: without a rework round (only foreign or pre-session changes) the message no longer says "after a rework round";
+  it reads "Verbleibende Befunde (keine Nacharbeitsrunde ausgeloest)".
+
+### Documented (0.3.1)
+
+- `protected` / `allowed` patterns with a `/` are anchored at the project root (`vendor/` does not cover
+  `src/vendor/`; list both); `**` is not recursive; only patterns without `/` match the file name in any folder.
+  README (EN/DE) now also states what fails open and what denies. Tests in `tests/test_session_gate.py`.
+
 ### Added (0.3.0)
 
 - Stop gate reaches the model without a hand-made lock: `[stop_gate] ownership = "session"` takes a baseline
