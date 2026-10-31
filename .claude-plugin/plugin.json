@@ -1,12 +1,16 @@
 {
   "name": "workflowhooker",
   "description": "Workflow gates that measure the project state instead of trusting the agent: a closing gate with exactly one rework round, drift and scope warnings. Configured per project in workflowhooker.toml.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
     "name": "ellmos-ai"
   },
   "license": "MIT",
   "homepage": "https://github.com/ellmos-ai/workflowhooker",
   "repository": "https://github.com/ellmos-ai/workflowhooker",
-  "keywords": ["hooks", "workflow", "quality-gate", "stop-hook", "scope", "drift"]
+  "keywords": ["hooks", "workflow", "quality-gate", "stop-hook", "scope", "drift"],
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://github.com/ellmos-ai/workflowhooker#claude-code-plugin",
+  "supportUrl": "https://ellmos-ai.github.io/plugins.html#support",
+  "privacyPolicyUrl": "https://ellmos-ai.github.io/plugins.html#privacy"
 }

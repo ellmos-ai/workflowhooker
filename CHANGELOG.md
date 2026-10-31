@@ -4,6 +4,15 @@ All notable public changes are documented in this file.
 
 ## Unreleased
 
+### Fixed (0.2.2)
+
+- Claude Code plugin works from a bare checkout again: since the hook-master core became a hard dependency,
+  `python -m workflowhooker` failed without `pip install`. The plugin now ships `hook_master` in `vendor/` at
+  the commit pinned in pyproject.toml (`tools/vendor_hook_master.py`), and `hooks/run.sh` joins `PYTHONPATH`
+  with `;` on Windows. Test `test_plugin_hook_runs_without_installed_packages` runs the hook with `python -S`.
+- plugin.json: icon, documentationUrl, supportUrl, privacyPolicyUrl for the Claude plugin directory.
+
+
 ### Added
 
 - Claude Code plugin workflowhooker (.claude-plugin/plugin.json, hooks/hooks.json, hooks/run.sh,

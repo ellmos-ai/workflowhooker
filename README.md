@@ -152,7 +152,20 @@ creates a starter file (closing gate with one rework round, no `taskplan` source
 
 Data flow: local files and `git` only, nothing is sent over the network. Python 3.10+ is required (`py -3` on Windows,
 or set `ELLMOS_PYTHON`). Compatibility: Claude Code (hooks, command, skill); Codex through its own hook snippet
-(`install-snippet --provider codex`).
+(`install-snippet --provider codex`). The plugin hooks read the hook payload, `workflowhooker.toml`, project files
+and `git status`; they do not read conversation transcripts and keep only counters and hashes in
+`~/.workflowhooker/` (override with `WORKFLOWHOOKER_STATE_DIR`). The plugin ships its one dependency,
+`hook_master`, in `vendor/` at the commit pinned in `pyproject.toml` (`python tools/vendor_hook_master.py`
+regenerates it). Privacy and support: <https://ellmos-ai.github.io/plugins.html>.
+
+Examples:
+
+1. `/workflowhooker:gates init`, then ask Claude to fix a failing test. If Claude stops while the project
+   still shows unfinished work, the closing gate asks for exactly one rework round with the measured evidence.
+2. Add `"drift_warning"` to `[mode] checks` and ask for a refactor that spreads across many folders. Once more
+   than `max_touched_dirs` top-level folders have changes, the hook reports a drift hint naming them.
+3. `/workflowhooker:gates status` runs the configured checks once and reports which gates are active and what
+   they currently find.
 
 ## Data and security boundaries
 

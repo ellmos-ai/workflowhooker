@@ -126,7 +126,22 @@ Dieses Repository ist zugleich das Claude-Code-Plugin `workflowhooker`. Es verdr
 
 Datenfluss: nur lokale Dateien und `git`, nichts geht ins Netz. Voraussetzung ist Python 3.10+ (`py -3` unter Windows
 oder `ELLMOS_PYTHON` setzen). Kompatibilität: Claude Code (Hooks, Befehl, Skill); Codex über das eigene Hook-Snippet
-(`install-snippet --provider codex`).
+(`install-snippet --provider codex`). Die Plugin-Hooks lesen die Hook-Eingabe, `workflowhooker.toml`, Projektdateien
+und `git status`; Gesprächstranskripte lesen sie nicht. Gespeichert werden nur Zähler und Hashes in
+`~/.workflowhooker/` (änderbar über `WORKFLOWHOOKER_STATE_DIR`). Seine einzige Abhängigkeit `hook_master` bringt das
+Plugin in `vendor/` mit, auf dem in `pyproject.toml` gepinnten Commit (`python tools/vendor_hook_master.py` erzeugt es
+neu). Datenschutz und Support: <https://ellmos-ai.github.io/plugins.html>.
+
+Beispiele:
+
+1. `/workflowhooker:gates init`, dann Claude einen fehlschlagenden Test reparieren lassen. Hört Claude auf, obwohl
+   das Projekt noch offene Arbeit zeigt, verlangt das Abschluss-Gate genau eine Nacharbeitsrunde mit dem gemessenen
+   Beleg.
+2. `"drift_warning"` in `[mode] checks` aufnehmen und einen Umbau über viele Ordner verlangen. Sobald mehr als
+   `max_touched_dirs` Ordner der obersten Ebene Änderungen haben, meldet der Hook einen Drift-Hinweis mit ihren
+   Namen.
+3. `/workflowhooker:gates status` führt die konfigurierten Prüfungen einmal aus und meldet, welche Gates aktiv sind
+   und was sie gerade finden.
 
 ## Datenschutz und Lizenz
 
