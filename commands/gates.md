@@ -24,6 +24,7 @@ order = ["files", "git"]
 
 [stop_gate]
 enabled = true
+ownership = "session"
 max_rework_rounds = 1
 
 [checks.drift_warning]
@@ -31,6 +32,11 @@ max_touched_dirs = 4
 
 [checks.scope_guard]
 max_changed_files = 15
+# Path rules (need "scope_guard" in [mode] checks): Edit/Write/MultiEdit/NotebookEdit on these paths are denied.
+# protected = ["vendor/", "*.lock"]   # never edit
+# allowed = ["src/", "tests/"]        # edit nothing else
 ```
 
-Add `"drift_warning"` or `"scope_guard"` to `checks` when the user wants those warnings too.
+`ownership = "session"` lets the gate recognise uncommitted changes made since the first hook of this session as
+the session's own, so Stop is blocked once with the evidence (no lock file needed). Add `"drift_warning"` or
+`"scope_guard"` to `checks` when the user wants those warnings or the path rules too.

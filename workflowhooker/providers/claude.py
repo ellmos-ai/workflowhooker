@@ -5,7 +5,9 @@ automatisch in eine echte ``settings.json`` -- Installation bleibt ein
 dokumentierter manueller Schritt.
 
 Default-Snippet nutzt ausschliesslich ``Stop``, ``PreCompact`` und
-``UserPromptSubmit`` -- niemals ``PreToolUse`` fuer Hinweise.
+``UserPromptSubmit`` -- niemals ``PreToolUse`` fuer Hinweise. (Das Claude-Code-
+Plugin verdrahtet ``PreToolUse`` bewusst selbst, nur fuer die Pfadregeln des
+``scope_guard`` und den Aktionsguard -- harte Blocker, keine Hinweise.)
 
 ``pretooluse_blocker_snippet()`` existiert als GETRENNTE Methode fuer den
 Fall, dass irgendwann ein echter, hart geprueften Blocker gebaut wird

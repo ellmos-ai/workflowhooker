@@ -4,6 +4,25 @@ All notable public changes are documented in this file.
 
 ## Unreleased
 
+### Added (0.3.0)
+
+- Stop gate reaches the model without a hand-made lock: `[stop_gate] ownership = "session"` takes a baseline
+  (path -> content hash of the uncommitted files) at the first `UserPromptSubmit`, `SessionStart` or `PreToolUse`
+  of a session. At Stop, changes made since then count as the session's own evidence, changes that were already
+  open stay untouched. The first Stop is blocked once with `{"decision": "block", "reason": ...}`; a second Stop
+  (`stop_hook_active` or a spent round) only reports the residue. Default stays `ownership = "lock"` (unchanged,
+  strict identity contract). The `/gates init` starter sets `ownership = "session"`.
+- Scope guard as `PreToolUse`: `[checks.scope_guard] protected = [...]` / `allowed = [...]` (active when
+  `scope_guard` is in `[mode] checks`) deny Edit, Write, MultiEdit and NotebookEdit with `permissionDecision: deny`
+  and a reason that reaches the model. Independent of identity and locks. The plugin registers `PreToolUse`
+  (matcher `Edit|Write|MultiEdit|NotebookEdit`); it stays silent without `workflowhooker.toml`.
+- Rework message now says what to do (close the state or give the reason).
+- Tests `tests/test_session_gate.py`; evals `evals/scope-vendor`, `evals/close-dirty-tree` (see `evals/README.md`).
+
+### Changed (0.3.0)
+
+- `__version__` was stuck at 0.2.1; now 0.3.0 like the plugin and package metadata.
+
 ### Fixed (0.2.2)
 
 - Claude Code plugin works from a bare checkout again: since the hook-master core became a hard dependency,

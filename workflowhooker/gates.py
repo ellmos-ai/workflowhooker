@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .baseline import owned_changes, take_snapshot
 from .config import Config
 from .decisions import Decision, EvidenceState, GateResult, HookSurface, combine_results
 from .locks import LockRecord, LockSnapshot, inspect_locks
@@ -102,6 +104,72 @@ def extract_action_targets(payload: dict[str, Any], cwd: Path) -> ActionTargets:
         except (OSError, ValueError):
             return ActionTargets(True, malformed=True)
     return ActionTargets(True, tuple(targets))
+
+
+def _path_matches(rel: str, pattern: str) -> bool:
+    pat = pattern.replace("\\", "/").removeprefix("./").rstrip("/").removesuffix("/**").casefold()
+    rel = rel.casefold()
+    return (
+        rel == pat
+        or rel.startswith(pat + "/")
+        or fnmatch.fnmatchcase(rel, pat)
+        or ("/" not in pat and fnmatch.fnmatchcase(rel.rsplit("/", 1)[-1], pat))
+    )
+
+
+def evaluate_scope_paths(
+    payload: dict[str, Any], config: Config, project_dir: Path
+) -> GateResult | None:
+    """Pfadregeln des ``scope_guard`` fuer PreToolUse; ``None`` = nicht zustaendig.
+
+    Unabhaengig von Identitaet und Locks: ein geschuetzter oder ausserhalb von
+    ``allowed`` liegender Pfad wird abgelehnt, die Begruendung geht an das Modell.
+    """
+    rules = config.checks.scope_guard
+    if "scope_guard" not in config.mode.checks or not (rules.protected or rules.allowed):
+        return None
+    extracted = extract_action_targets(payload, project_dir)
+    if not extracted.covered:
+        return None
+    target_key = "pending-action"
+    if extracted.malformed:
+        return GateResult(
+            HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.UNKNOWN,
+            "scope-target-unresolved",
+            "Dateiaktion gesperrt: Ziel konnte fuer die Scope-Pruefung nicht sicher bestimmt werden.",
+            target_key,
+        )
+    root = project_dir.resolve(strict=False)
+    for target in extracted.targets:
+        try:
+            rel = target.relative_to(root).as_posix()
+        except ValueError:
+            rel = None
+        if rel is not None:
+            hit = next((p for p in rules.protected if _path_matches(rel, p)), None)
+            if hit:
+                return GateResult(
+                    HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.FINDING,
+                    "scope-protected",
+                    f"Scope-Guard: '{rel}' ist geschuetzt ([checks.scope_guard].protected: '{hit}'). "
+                    "Datei nicht aendern; die Ursache im erlaubten Bereich beheben oder dem Nutzer melden.",
+                    target_key,
+                )
+        if rules.allowed and not (
+            rel is not None and any(_path_matches(rel, p) for p in rules.allowed)
+        ):
+            return GateResult(
+                HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.FINDING,
+                "scope-outside",
+                f"Scope-Guard: '{rel or target}' liegt ausserhalb des erlaubten Bereichs "
+                f"([checks.scope_guard].allowed: {', '.join(rules.allowed)}). "
+                "Nur dort aendern oder dem Nutzer melden.",
+                target_key,
+            )
+    return GateResult(
+        HookSurface.ACTION_GUARD, Decision.ALLOW, EvidenceState.CLEAN, "scope-clean",
+        target_key=target_key,
+    )
 
 
 def _same_identity(record: LockRecord, config: Config, session_id: str) -> bool:
@@ -256,6 +324,7 @@ def _completion_facts(
     project_state: ProjectState,
     lock_snapshot: LockSnapshot,
     session_id: str,
+    session_view: tuple[list[str], list[str]] | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     own: list[str] = []
     foreign: list[str] = []
@@ -289,7 +358,14 @@ def _completion_facts(
         else:
             own.append(f"eigener Lock ({record.kind})")
 
-    if project_state.git_available:
+    if session_view is not None:
+        mine, older = session_view
+        if mine:
+            shown = ", ".join(mine[:5]) + (" ..." if len(mine) > 5 else "")
+            own.append(f"{len(mine)} offene Änderung(en) aus dieser Sitzung ({shown})")
+        if older:
+            foreign.append(f"{len(older)} schon vor Sitzungsbeginn offene Änderung(en)")
+    elif project_state.git_available:
         if project_state.git_dirty:
             if own:
                 own.append(
@@ -323,7 +399,13 @@ def _completion_message(
         if residual
         else "[WorkflowHooker] Genau eine Nacharbeitsrunde erforderlich: "
     )
-    return prefix + " | ".join(parts)
+    hint = (
+        ""
+        if residual
+        else " -- Schliesse den eigenen Abschlussstand jetzt ab (z. B. committen) "
+        "oder nenne in der Antwort den Grund, warum er offen bleibt."
+    )
+    return prefix + " | ".join(parts) + hint
 
 
 def evaluate_stop_gate(
@@ -353,8 +435,13 @@ def evaluate_stop_gate(
             EvidenceState.UNKNOWN, code="stop-lock-evaluation-failed"
         )
     session_id = str(payload.get("session_id") or "")
+    session_view = None
+    if config.stop_gate.ownership == "session" and state.baseline is not None:
+        current = take_snapshot(project_dir)
+        if current is not None:
+            session_view = owned_changes(state.baseline, current)
     own, foreign, unknown = _completion_facts(
-        config, project_dir, project_state, lock_snapshot, session_id
+        config, project_dir, project_state, lock_snapshot, session_id, session_view
     )
     if not own and not foreign and not unknown:
         return GateResult(

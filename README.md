@@ -16,7 +16,9 @@ explicitly enabled.
 - `drift_warning`: warns when changes span more top-level directories than a
   configured threshold.
 - `scope_guard`: warns when the number of changed files exceeds a configured
-  threshold.
+  threshold. With `protected` / `allowed` path lists it also denies Edit, Write,
+  MultiEdit and NotebookEdit on those paths (`PreToolUse`, Claude Code plugin or
+  `install-snippet --variant action-guard`).
 - File, Git, and task-plan state sources with a configurable source order.
 - Provider adapters for Claude Code, Codex CLI, Kimi Code CLI, Git, and manual
   execution.
@@ -24,7 +26,8 @@ explicitly enabled.
 - An opt-in action guard whose failures deny only the matched critical file
   action, independently of advisory budgets.
 - An opt-in completion gate that requests exactly one evidenced rework round
-  and then reports residual findings without another stop loop.
+  (Claude Code: `{"decision": "block", "reason": ...}`, so the finding reaches the
+  model) and then reports residual findings without another stop loop.
 
 The drift and scope checks are heuristics. They report observable counts; they
 do not claim to understand the user's task or whether tests ran.
@@ -69,6 +72,7 @@ enabled = false
 
 [stop_gate]
 enabled = false
+ownership = "lock"        # "session": changes since the session's first hook count as own, no lock needed
 max_rework_rounds = 1
 
 [checks.drift_warning]
@@ -76,7 +80,14 @@ max_touched_dirs = 4
 
 [checks.scope_guard]
 max_changed_files = 15
+# Path rules, relative to the project folder; active when "scope_guard" is in [mode] checks.
+# protected = ["vendor/", "*.lock"]   # Edit/Write/MultiEdit/NotebookEdit on these paths are denied
+# allowed = ["src/", "tests/"]        # if set, nothing else may be edited (also outside the project)
 ```
+
+Path patterns: `dir/` or `dir/**` (a folder and everything below it), an exact relative path, or a glob such as
+`*.lock` (a pattern without `/` also matches the file name in any folder); matching ignores case. Shell commands
+(`Bash`, `PowerShell`) are not inspected, so the path rules are a guard rail against edits, not a sandbox.
 
 Without a configuration file, `checks` is empty and the program emits no
 workflow warnings.
@@ -134,16 +145,32 @@ fresh round. The complete Stop load/evaluate/save transaction is serialized by
 a per-state-file process lock; lock failures or timeouts use the same
 non-blocking unknown residual. It checks the main clone when the
 event comes from an isolated worktree. Only an owned, correlated finding can
-request the one rework round. A second Stop, a host-provided
+request the one rework round.
+
+Ownership has two sources. `ownership = "lock"` (default) accepts only an own
+lock with the full identity above. `ownership = "session"` additionally
+takes a baseline at the first `UserPromptSubmit`, `SessionStart` or
+`PreToolUse` of a session (relative paths of the uncommitted files plus a
+content hash) and counts what is new or different at Stop as the session's own
+evidence; changes that were already open stay untouched and are only named.
+Without a baseline (no such hook ran) the gate never blocks. The limit: the
+baseline cannot tell two agents in the same working tree apart, and a file that
+another process keeps rewriting counts as changed; use `lock` there. A second Stop, a host-provided
 `stop_hook_active`, foreign state, or damaged state returns a residual warning
 without another block. WorkflowHooker never deletes locks, resets diffs, or
 otherwise cleans foreign work.
 
 ## Claude Code plugin
 
-This repository is also the Claude Code plugin `workflowhooker`. It wires `hook-run` to `Stop`, `PreCompact` and
-`UserPromptSubmit` and stays silent until the project contains `workflowhooker.toml`; `/workflowhooker:gates init`
-creates a starter file (closing gate with one rework round, no `taskplan` source). Skill: `workflow-gates`.
+This repository is also the Claude Code plugin `workflowhooker`. It wires `hook-run` to `Stop`, `PreToolUse`
+(matcher `Edit|Write|MultiEdit|NotebookEdit`), `PreCompact` and `UserPromptSubmit` and stays silent until the
+project contains `workflowhooker.toml`; `/workflowhooker:gates init` creates a starter file (closing gate with one
+rework round and `ownership = "session"`, no `taskplan` source, commented path rules). Skill: `workflow-gates`.
+
+What reaches Claude: on Stop the closing gate answers `{"decision": "block", "reason": ...}` once, so the open
+points are in the model's context and it works one more round; on the second Stop (`stop_hook_active`, or the round
+is spent) it only shows the residue to you and never loops. A denied edit carries `permissionDecisionReason`, which
+Claude sees. Both need no lock file with the starter configuration.
 
 ```
 /plugin marketplace add ellmos-ai/ellmos-plugins
@@ -153,18 +180,28 @@ creates a starter file (closing gate with one rework round, no `taskplan` source
 Data flow: local files and `git` only, nothing is sent over the network. Python 3.10+ is required (`py -3` on Windows,
 or set `ELLMOS_PYTHON`). Compatibility: Claude Code (hooks, command, skill); Codex through its own hook snippet
 (`install-snippet --provider codex`). The plugin hooks read the hook payload, `workflowhooker.toml`, project files
-and `git status`; they do not read conversation transcripts and keep only counters and hashes in
-`~/.workflowhooker/` (override with `WORKFLOWHOOKER_STATE_DIR`). The plugin ships its one dependency,
+and `git status`; they do not read conversation transcripts. They keep counters, hashes and, with
+`ownership = "session"`, the relative paths of the uncommitted files at session start with a content hash each,
+in `~/.workflowhooker/` (override with `WORKFLOWHOOKER_STATE_DIR`). The plugin ships its one dependency,
 `hook_master`, in `vendor/` at the commit pinned in `pyproject.toml` (`python tools/vendor_hook_master.py`
 regenerates it). Privacy and support: <https://ellmos-ai.github.io/plugins.html>.
 
 Examples:
 
-1. `/workflowhooker:gates init`, then ask Claude to fix a failing test. If Claude stops while the project
-   still shows unfinished work, the closing gate asks for exactly one rework round with the measured evidence.
-2. Add `"drift_warning"` to `[mode] checks` and ask for a refactor that spreads across many folders. Once more
+1. `/workflowhooker:gates init` in a git repository, then ask Claude to fix a bug and "tell me when you are done".
+   If Claude stops with uncommitted changes of this session, the Stop is blocked once and the reason names them
+   ("1 open change(s) from this session (calc.py) ... close it, e.g. commit, or give the reason"); Claude commits or
+   explains. The same Stop a second time only reports. Changes that were already uncommitted before the session are
+   named but not demanded.
+   Reproduce without Claude: `echo '{"session_id":"s","cwd":"."}' | python -m workflowhooker --config workflowhooker.toml hook-run UserPromptSubmit`,
+   edit a file, then `echo '{"session_id":"s","cwd":"."}' | python -m workflowhooker --config workflowhooker.toml hook-run Stop`
+   (needs `PYTHONPATH` with the plugin folder and `vendor/`).
+2. Add `"scope_guard"` to `[mode] checks` and `protected = ["vendor/"]` under `[checks.scope_guard]`, then report a
+   bug whose cause sits in `vendor/`: the edit is denied with the rule as the reason and Claude has to fix the cause
+   elsewhere or report back.
+3. Add `"drift_warning"` to `[mode] checks` and ask for a refactor that spreads across many folders. Once more
    than `max_touched_dirs` top-level folders have changes, the hook reports a drift hint naming them.
-3. `/workflowhooker:gates status` runs the configured checks once and reports which gates are active and what
+4. `/workflowhooker:gates status` runs the configured checks once and reports which gates are active and what
    they currently find.
 
 ## Data and security boundaries

@@ -55,8 +55,26 @@ enabled = false
 
 [stop_gate]
 enabled = false
+ownership = "lock"        # "session": Änderungen seit dem ersten Hook der Sitzung gelten als eigene, kein Lock nötig
 max_rework_rounds = 1
+
+[checks.scope_guard]
+max_changed_files = 15
+# Pfadregeln relativ zum Projektordner; aktiv, wenn "scope_guard" in [mode] checks steht.
+# protected = ["vendor/", "*.lock"]   # Edit/Write/MultiEdit/NotebookEdit auf diese Pfade wird abgelehnt
+# allowed = ["src/", "tests/"]        # wenn gesetzt: sonst darf nichts bearbeitet werden (auch außerhalb des Projekts)
 ```
+
+Pfadmuster: `ordner/` oder `ordner/**` (Ordner samt Inhalt), ein genauer relativer Pfad oder ein Glob wie `*.lock`
+(ein Muster ohne `/` trifft auch den Dateinamen in jedem Ordner); Groß-/Kleinschreibung wird ignoriert. Shell-Befehle
+(`Bash`, `PowerShell`) werden nicht geprüft: Die Pfadregeln sind eine Leitplanke gegen Bearbeitungen, keine Sandbox.
+
+`ownership = "lock"` (Standard) akzeptiert als Eigentumsbeleg für das Abschluss-Gate nur einen eigenen Lock mit voller
+Identität. `ownership = "session"` nimmt zusätzlich beim ersten `UserPromptSubmit`, `SessionStart` oder `PreToolUse`
+einer Sitzung eine Basislinie auf (relative Pfade der uncommitteten Dateien plus Inhalts-Hash) und wertet beim Stop
+alles Neue oder Geänderte als eigenen Beleg; schon vorher Offenes wird nur genannt. Ohne Basislinie blockiert das Gate
+nie. Grenze: Die Basislinie kann zwei Agenten im selben Arbeitsbaum nicht trennen, und eine Datei, die ein anderer
+Prozess ständig neu schreibt, gilt als geändert; dort `lock` verwenden.
 
 Ohne Konfigurationsdatei ist die Check-Liste leer und das Modul gibt keine
 Ablaufwarnungen aus.
@@ -115,9 +133,15 @@ Locks, setzt keine Diffs zurück und räumt fremde Arbeit niemals automatisch au
 ## Claude-Code-Plugin
 
 Dieses Repository ist zugleich das Claude-Code-Plugin `workflowhooker`. Es verdrahtet `hook-run` mit `Stop`,
-`PreCompact` und `UserPromptSubmit` und bleibt still, solange das Projekt keine `workflowhooker.toml` enthält;
-`/workflowhooker:gates init` legt eine Startdatei an (Abschluss-Gate mit genau einer Nacharbeitsrunde, ohne
-`taskplan`-Quelle). Skill: `workflow-gates`.
+`PreToolUse` (Matcher `Edit|Write|MultiEdit|NotebookEdit`), `PreCompact` und `UserPromptSubmit` und bleibt still,
+solange das Projekt keine `workflowhooker.toml` enthält; `/workflowhooker:gates init` legt eine Startdatei an
+(Abschluss-Gate mit genau einer Nacharbeitsrunde und `ownership = "session"`, ohne `taskplan`-Quelle, auskommentierte
+Pfadregeln). Skill: `workflow-gates`.
+
+Was Claude erreicht: Beim Stop antwortet das Abschluss-Gate einmal mit `{"decision": "block", "reason": ...}`; die
+offenen Punkte stehen damit im Kontext des Modells, und es arbeitet eine Runde nach. Beim zweiten Stop
+(`stop_hook_active` oder verbrauchte Runde) zeigt es den Rest nur dir an und schleift nie. Eine abgelehnte Bearbeitung
+trägt `permissionDecisionReason`, den Claude sieht. Beides braucht mit der Startkonfiguration keine Lockdatei.
 
 ```
 /plugin marketplace add ellmos-ai/ellmos-plugins
@@ -127,20 +151,29 @@ Dieses Repository ist zugleich das Claude-Code-Plugin `workflowhooker`. Es verdr
 Datenfluss: nur lokale Dateien und `git`, nichts geht ins Netz. Voraussetzung ist Python 3.10+ (`py -3` unter Windows
 oder `ELLMOS_PYTHON` setzen). Kompatibilität: Claude Code (Hooks, Befehl, Skill); Codex über das eigene Hook-Snippet
 (`install-snippet --provider codex`). Die Plugin-Hooks lesen die Hook-Eingabe, `workflowhooker.toml`, Projektdateien
-und `git status`; Gesprächstranskripte lesen sie nicht. Gespeichert werden nur Zähler und Hashes in
+und `git status`; Gesprächstranskripte lesen sie nicht. Gespeichert werden Zähler, Hashes und, mit
+`ownership = "session"`, die relativen Pfade der beim Sitzungsstart uncommitteten Dateien mit je einem Inhalts-Hash in
 `~/.workflowhooker/` (änderbar über `WORKFLOWHOOKER_STATE_DIR`). Seine einzige Abhängigkeit `hook_master` bringt das
 Plugin in `vendor/` mit, auf dem in `pyproject.toml` gepinnten Commit (`python tools/vendor_hook_master.py` erzeugt es
 neu). Datenschutz und Support: <https://ellmos-ai.github.io/plugins.html>.
 
 Beispiele:
 
-1. `/workflowhooker:gates init`, dann Claude einen fehlschlagenden Test reparieren lassen. Hört Claude auf, obwohl
-   das Projekt noch offene Arbeit zeigt, verlangt das Abschluss-Gate genau eine Nacharbeitsrunde mit dem gemessenen
-   Beleg.
-2. `"drift_warning"` in `[mode] checks` aufnehmen und einen Umbau über viele Ordner verlangen. Sobald mehr als
+1. `/workflowhooker:gates init` in einem Git-Repository, dann Claude einen Fehler beheben und „sag Bescheid, wenn du
+   fertig bist“ sagen lassen. Hört Claude mit uncommitteten Änderungen dieser Sitzung auf, wird der Stop einmal
+   blockiert und der Grund nennt sie („1 offene Änderung(en) aus dieser Sitzung (calc.py) ... abschließen, z. B.
+   committen, oder Grund nennen“); Claude committet oder erklärt. Derselbe Stop ein zweites Mal meldet nur noch. Schon
+   vor der Sitzung Uncommittetes wird genannt, aber nicht verlangt.
+   Ohne Claude nachstellen: `echo '{"session_id":"s","cwd":"."}' | python -m workflowhooker --config workflowhooker.toml hook-run UserPromptSubmit`,
+   eine Datei ändern, dann `echo '{"session_id":"s","cwd":"."}' | python -m workflowhooker --config workflowhooker.toml hook-run Stop`
+   (`PYTHONPATH` braucht Plugin-Ordner und `vendor/`).
+2. `"scope_guard"` in `[mode] checks` aufnehmen und unter `[checks.scope_guard]` `protected = ["vendor/"]` setzen,
+   dann einen Fehler melden, dessen Ursache in `vendor/` liegt: Die Bearbeitung wird mit der Regel als Grund abgelehnt,
+   Claude muss die Ursache anderswo beheben oder zurückmelden.
+3. `"drift_warning"` in `[mode] checks` aufnehmen und einen Umbau über viele Ordner verlangen. Sobald mehr als
    `max_touched_dirs` Ordner der obersten Ebene Änderungen haben, meldet der Hook einen Drift-Hinweis mit ihren
    Namen.
-3. `/workflowhooker:gates status` führt die konfigurierten Prüfungen einmal aus und meldet, welche Gates aktiv sind
+4. `/workflowhooker:gates status` führt die konfigurierten Prüfungen einmal aus und meldet, welche Gates aktiv sind
    und was sie gerade finden.
 
 ## Datenschutz und Lizenz

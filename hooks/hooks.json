@@ -1,6 +1,9 @@
 {
-  "description": "Runs the configured workflowhooker gates (closing gate, drift and scope warnings) on Stop, PreCompact and UserPromptSubmit. Silent unless the project contains workflowhooker.toml. Local files and git only.",
+  "description": "Runs the configured workflowhooker gates on Stop (closing gate: one rework round that reaches Claude), PreToolUse (scope guard: protected paths are denied), PreCompact and UserPromptSubmit. Silent unless the project contains workflowhooker.toml. Local files and git only.",
   "hooks": {
+    "PreToolUse": [
+      {"matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" PreToolUse", "timeout": 30}]}
+    ],
     "Stop": [
       {"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" Stop", "timeout": 30}]}
     ],
