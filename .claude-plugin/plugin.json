@@ -1,7 +1,7 @@
 {
   "name": "workflowhooker",
   "description": "Workflow gates that measure the project state instead of trusting the agent: a closing gate with exactly one rework round, drift and scope warnings. Configured per project in workflowhooker.toml.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "ellmos-ai"
   },
