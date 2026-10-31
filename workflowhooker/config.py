@@ -33,6 +33,11 @@ class DriftWarningConfig:
 @dataclass
 class ScopeGuardConfig:
     max_changed_files: int = 15
+    # PreToolUse-Pfadregeln (Edit/Write/MultiEdit/NotebookEdit), relativ zum
+    # Projektordner: ``protected`` ist verboten, ``allowed`` (wenn gesetzt) ist
+    # der einzige erlaubte Bereich. Muster: ``vendor/``, ``docs/**``, ``*.lock``.
+    protected: list[str] = field(default_factory=list)
+    allowed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +79,10 @@ class ActionGuardConfig:
 @dataclass
 class StopGateConfig:
     enabled: bool = False
+    # Woher der Eigentumsbeleg fuer offene Aenderungen kommt: "lock" = nur ein
+    # eigener Lock mit voller Identitaet (streng, Default); "session" = zusaetzlich
+    # die Sitzungs-Basislinie (Aenderungen seit dem ersten Hook dieser Sitzung).
+    ownership: str = "lock"
     # E02=B ist absichtlich nicht als frei erhoehbares Schleifenbudget
     # modelliert: genau eine Nacharbeitsrunde ist der feste Vertrag.
     max_rework_rounds: int = 1
@@ -208,6 +217,12 @@ class Config:
                 f"[sources].order enthaelt unbekannte Quellen {unknown_sources}; "
                 f"gueltig sind {VALID_SOURCES}"
             )
+        if self.stop_gate.ownership not in ("lock", "session"):
+            raise ValueError('[stop_gate].ownership muss "lock" oder "session" sein')
+        for key in ("protected", "allowed"):
+            value = getattr(self.checks.scope_guard, key)
+            if not all(isinstance(item, str) and item.strip() for item in value):
+                raise ValueError(f"[checks.scope_guard].{key} muss eine Liste nichtleerer Strings sein")
         if self.stop_gate.max_rework_rounds != 1:
             raise ValueError(
                 "[stop_gate].max_rework_rounds muss fuer E02=B genau 1 sein"
@@ -281,7 +296,9 @@ def _config_from_dict(data: dict) -> Config:
         scope_guard=ScopeGuardConfig(
             max_changed_files=scope_data.get(
                 "max_changed_files", ScopeGuardConfig.max_changed_files
-            )
+            ),
+            protected=_string_list(scope_data.get("protected", []), "protected"),
+            allowed=_string_list(scope_data.get("allowed", []), "allowed"),
         ),
     )
 
@@ -359,6 +376,7 @@ def _config_from_dict(data: dict) -> Config:
     stop_gate_data = data.get("stop_gate", {})
     stop_gate = StopGateConfig(
         enabled=bool(stop_gate_data.get("enabled", False)),
+        ownership=str(stop_gate_data.get("ownership", "lock")),
         max_rework_rounds=int(stop_gate_data.get("max_rework_rounds", 1)),
     )
 
@@ -374,6 +392,12 @@ def _config_from_dict(data: dict) -> Config:
         stop_gate=stop_gate,
         compaction=compaction,
     )
+
+
+def _string_list(value: object, key: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"[checks.scope_guard].{key} muss eine Liste sein")
+    return list(value)
 
 
 def _enabled_value(value: object) -> bool:

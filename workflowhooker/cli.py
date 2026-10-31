@@ -38,7 +38,8 @@ from .checks import CHECK_REGISTRY, CheckRunner
 from .compaction import build_compaction_output
 from .config import Config, load_config
 from .decisions import Decision, EvidenceState, GateResult, HookSurface
-from .gates import evaluate_action_guard, evaluate_stop_gate
+from .baseline import take_snapshot
+from .gates import evaluate_action_guard, evaluate_scope_paths, evaluate_stop_gate
 from .injectors import GoalInjector, LocationInjector, LoopInjector, PolicyInjector
 from .locks import canonical_project_root
 from .providers import PROVIDER_REGISTRY, resolve_provider
@@ -365,8 +366,27 @@ def _cmd_hook_run(args) -> int:
         args.project_dir or _extract_cwd(payload) or Path.cwd()
     )
 
+    if args.event in ("PreToolUse", "UserPromptSubmit", "SessionStart"):
+        _ensure_baseline(args, config, payload, project_dir)
+
     if args.event == "PreToolUse":
-        if config.action_guard.enabled and not payload_reliable:
+        rules = config.checks.scope_guard
+        if "scope_guard" in config.mode.checks and (rules.protected or rules.allowed):
+            # Pfadregeln gelten ohne Identitaet/Lock; Nicht-Zustaendigkeit = None.
+            if not payload_reliable:
+                scope_result = GateResult(
+                    HookSurface.ACTION_GUARD, Decision.DENY, EvidenceState.UNKNOWN,
+                    "payload-unavailable",
+                    "Dateiaktion gesperrt: Hook-Payload fuer die Scope-Pruefung nicht belastbar.",
+                    "pending-action",
+                )
+            else:
+                scope_result = evaluate_scope_paths(payload, config, project_dir)
+            if scope_result is not None and scope_result.decision is not Decision.ALLOW:
+                return _emit_action_result(scope_result, args.provider)
+        if not config.action_guard.enabled:
+            return 0
+        if not payload_reliable:
             result = GateResult(
                 HookSurface.ACTION_GUARD,
                 Decision.DENY,
@@ -480,6 +500,30 @@ def _cmd_hook_run(args) -> int:
         else:
             print(json.dumps(output, ensure_ascii=False))
     return 0
+
+
+def _ensure_baseline(args, config: Config, payload: dict, project_dir: Path) -> None:
+    """Haelt beim ersten Hook einer Sitzung fest, was schon uncommittet war.
+
+    Voraussetzung fuer ``[stop_gate].ownership = "session"``. Best effort: ein
+    Fehler hier darf keinen Hook kippen (ohne Basislinie bleibt der Eigentums-
+    beleg einfach aus).
+    """
+    if not (config.stop_gate.enabled and config.stop_gate.ownership == "session"):
+        return
+    path = state_path_for_session(args.session_id or _extract_session_id(payload), args.state_dir)
+    try:
+        with state_transaction(path):
+            state, reliable = SessionState.load_checked(path)
+            if not reliable or state.baseline is not None:
+                return
+            snapshot = take_snapshot(project_dir)
+            if snapshot is None:
+                return
+            state.baseline = snapshot
+            state.save(path)
+    except (OSError, StateTransactionTimeout, StopRuntimeIntegrityError):
+        return
 
 
 def _emit_action_result(result: GateResult, provider: str) -> int:

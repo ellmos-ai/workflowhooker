@@ -93,6 +93,16 @@ def _validate_stop_gates(stop_gates: dict[str, StopGateRuntime]) -> None:
             raise StopRuntimeIntegrityError("stop-runtime-identity-mismatch")
 
 
+def _baseline_from(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    ):
+        raise TypeError("baseline-malformed")
+    return value
+
+
 class StateTransactionTimeout(TimeoutError):
     """Der State konnte nicht innerhalb des Hook-Budgets serialisiert werden."""
 
@@ -168,6 +178,8 @@ class SessionState:
     checks: dict[str, CheckRuntime] = field(default_factory=dict)
     stop_gates: dict[str, StopGateRuntime] = field(default_factory=dict)
     candidate_enqueued: bool = False
+    # Pfad -> Hash der beim ersten Sitzungs-Hook uncommitteten Dateien; None = nie erfasst.
+    baseline: dict[str, str] | None = None
 
     @classmethod
     def load(cls, path: Path) -> "SessionState":
@@ -213,6 +225,7 @@ class SessionState:
                 last_message_ts=data.get("last_message_ts"),
                 checks=checks,
                 stop_gates=stop_gates,
+                baseline=_baseline_from(data.get("baseline")),
             )
         except (TypeError, ValueError):
             return cls(), False
@@ -225,6 +238,7 @@ class SessionState:
             "messages_sent": self.messages_sent,
             "candidate_enqueued": self.candidate_enqueued,
             "last_message_ts": self.last_message_ts,
+            "baseline": self.baseline,
             "checks": {name: asdict(runtime) for name, runtime in self.checks.items()},
             "stop_gates": {
                 key: asdict(runtime) for key, runtime in self.stop_gates.items()
