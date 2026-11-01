@@ -4,6 +4,14 @@ All notable public changes are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `hook-run` (Stop, PreCompact, ...) no longer dies with `ImportError: cannot import name 'powershell_command'` when
+  the installed `hook_master` predates the pinned commit. The helper is imported only where the Codex/Windows shadow
+  snippet is built; before, the module-level import in `providers/shadow.py` took down every hook event, and a hook
+  that dies on import fails open. `tests/test_hook_master_compat.py` pins this and checks that every `hook_master`
+  symbol workflowhooker imports exists in the installed version, so such drift stays loud in the test run.
+
 ### Fixed (0.3.1)
 
 - The PreToolUse scope guard no longer locks the project when its own configuration is broken. An unloadable

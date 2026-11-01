@@ -17,8 +17,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-from hook_master.providers.codex import powershell_command
-
 from ..candidates import LifecycleController, LifecycleResult
 
 SHADOW_PROVIDERS = ("claude", "codex")
@@ -213,7 +211,13 @@ def build_shadow_command(
         argv.extend(("--session-root", str(session_root)))
     if windows:
         command = subprocess.list2cmdline(argv)
-        return powershell_command(command) if provider == "codex" else command
+        if provider != "codex":
+            return command
+        # Lazy: only this branch needs the helper.  A module-level import let a
+        # hook_master checkout without it crash every `hook-run` (Stop, PreCompact).
+        from hook_master.providers.codex import powershell_command
+
+        return powershell_command(command)
     return shlex.join(argv)
 
 
