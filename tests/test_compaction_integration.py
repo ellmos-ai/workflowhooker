@@ -4,6 +4,7 @@ import re
 import sys
 
 import pytest
+from hook_master.providers.codex import powershell_command
 
 from workflowhooker import cli
 from workflowhooker.compaction import COMPACTION_NOTICE_DE
@@ -77,7 +78,7 @@ def test_compaction_snippet_is_narrow_and_idempotent():
     assert len(group["hooks"]) == 1
     hook = group["hooks"][0]
     assert hook["timeout"] == 10
-    assert hook["command"] == hook["commandWindows"]
+    assert hook["commandWindows"] == powershell_command(hook["command"])
     assert hook["command"].endswith("hook-run SessionStart --provider codex")
     assert default == provider.hook_snippet()
     merged = merge_hook_snippets(default, snippet)

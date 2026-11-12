@@ -277,6 +277,14 @@ session-start and action-guard variants. Codex shadow commands apply the same
 rule. Bare executable names keep their existing form. A changed definition must
 be reviewed again through `/hooks` before Codex runs it.
 
+Generated `commandWindows` entries also keep the native exit code. Codex runs
+Windows hooks through `pwsh -Command`, which reports every non-zero exit as 1,
+so an exit-code block (exit 2, for example `hook-run Stop --block`) would show
+up as a failed hook instead of a block. The generated form is
+`$global:LASTEXITCODE = 0; <command>; $hookOk = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $hookOk) { exit 1 }`.
+Hand-written Codex configurations need the same wrapper. The PreToolUse guard
+is not affected: it answers Codex with a JSON `permissionDecision` and exit 0.
+
 Keep exactly one matching handler. Replace an older wildcard registration of this
 same command with the `session-start` variant before combining both variants;
 its matcher excludes compact. `--existing` produces only a hooks-only merge,

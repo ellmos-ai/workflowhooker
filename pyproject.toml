@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "ellmos-ai contributors" }]
 keywords = ["workflow", "llm-agent", "hook", "local-first"]
 dependencies = [
-    "hook-master @ git+https://github.com/ellmos-ai/hook-master.git@75e1aefd4c83386fb754b32579d78c2549aad732",
+    "hook-master @ git+https://github.com/ellmos-ai/hook-master.git@b9e15ecc3201492ba3fa2abab4cbed50bf7afba0",
 ]
 
 [project.optional-dependencies]

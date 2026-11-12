@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from hook_master.providers.codex import powershell_command
 
 from workflowhooker.cli import main
 
@@ -164,7 +165,7 @@ def test_install_snippet_supports_codex(tmp_path, capsys):
     assert exit_code == 0
     data = json.loads(out_path.read_text(encoding="utf-8"))
     command = data["hooks"]["Stop"][0]["hooks"][0]
-    assert command["commandWindows"] == command["command"]
+    assert command["commandWindows"] == powershell_command(command["command"])
     assert command["statusMessage"] == "WorkflowHooker: Stop"
 
 
