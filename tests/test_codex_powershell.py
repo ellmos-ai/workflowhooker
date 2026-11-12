@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from hook_master.providers.codex import powershell_command
 
 from workflowhooker.providers.codex import CodexProvider
 from workflowhooker.providers.shadow import build_shadow_command
@@ -25,7 +26,9 @@ def test_codex_variants_invoke_quoted_python(variant):
     snippet = getattr(CodexProvider(), variant)(python_executable=f'"{sys.executable}"')
     for groups in snippet["hooks"].values():
         handler = groups[0]["hooks"][0]
-        assert handler["commandWindows"] == "& " + handler["command"]
+        assert handler["commandWindows"] == powershell_command(handler["command"])
+        assert f'& "{sys.executable}" ' in handler["commandWindows"]
+        assert "exit $LASTEXITCODE" in handler["commandWindows"]
 
 
 def test_codex_shadow_quotes_python_as_powershell_invocation():
@@ -37,9 +40,8 @@ def test_codex_shadow_quotes_python_as_powershell_invocation():
         .values()
     ):
         handler = groups[0]["hooks"][0]
-        assert handler["commandWindows"].startswith(
-            '& "C:/Python Directory/python.exe" '
-        )
+        assert '& "C:/Python Directory/python.exe" ' in handler["commandWindows"]
+        assert "exit $LASTEXITCODE" in handler["commandWindows"]
     claude = build_shadow_command(
         "claude",
         "SessionStart",

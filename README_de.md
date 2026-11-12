@@ -248,6 +248,16 @@ Das POSIX-Befehlsfeld `command` bleibt ohne diesen Operator. Beispiel für
 & "C:/path/to/venv/Scripts/python.exe" -m workflowhooker --config "C:/path/to/workflowhooker.toml" hook-run SessionStart --provider codex
 ```
 
+Erzeugte `commandWindows`-Einträge reichen außerdem den Exit-Code durch. Codex
+startet Hooks unter Windows über `pwsh -Command`; PowerShell meldet dabei jeden
+Exit-Code ungleich 0 als 1. Eine Sperre per Exit-Code (Exit 2, etwa
+`hook-run Stop --block`) erschiene so als fehlgeschlagener Hook statt als Sperre.
+Die erzeugte Form lautet
+`$global:LASTEXITCODE = 0; <Befehl>; $hookOk = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $hookOk) { exit 1 }`.
+Handgeschriebene Codex-Konfigurationen brauchen dieselbe Hülle. Der
+PreToolUse-Guard ist nicht betroffen: Er antwortet Codex mit einem
+JSON-`permissionDecision` und Exit 0.
+
 Genau einen passenden Handler registrieren. Eine ältere Registrierung desselben
 SessionStart-Befehls ohne Matcher vorher durch die Variante `session-start`
 ersetzen; deren Matcher schließt Komprimierung aus. `--existing` erzeugt nur ein

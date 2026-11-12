@@ -6,6 +6,17 @@ All notable public changes are documented in this file.
 
 ### Fixed
 
+- Codex on Windows: generated `commandWindows` entries now keep the native exit code. The `hook-master` pin moves from
+  `75e1aef` to `b9e15ec` (`fix(codex): keep native exit code in Windows commandWindows`), and `vendor/hook_master` is
+  re-vendored at that commit. Before, PowerShell reported every non-zero exit as 1, so an exit-code block such as
+  `hook-run Stop --block` reached Codex as a failed hook. The PreToolUse guard was not affected (JSON decision, exit 0).
+  The pin step spans 20 `hook-master` commits, so it also brings: a stricter consent check (`consented` counts only
+  when it is the JSON value `true`; a malformed consent file yields an empty allowlist), quoting of interpreter paths
+  with spaces for Claude, Kimi and agy, and the new canonical script `lock_edit_guard`.
+- `install-snippet --existing` no longer registers every Codex hook twice when the existing configuration was generated
+  before the wrapper. `merge_hook_snippets` compared only `commandWindows`, whose generated form changes with the pin;
+  it now treats a handler as already registered when `command` or `commandWindows` matches. The merge keeps the
+  existing handler as it is: regenerate the Codex snippet to get the exit-code wrapper into an old configuration.
 - `hook-run` (Stop, PreCompact, ...) no longer dies with `ImportError: cannot import name 'powershell_command'` when
   the installed `hook_master` predates the pinned commit. The helper is imported only where the Codex/Windows shadow
   snippet is built; before, the module-level import in `providers/shadow.py` took down every hook event, and a hook

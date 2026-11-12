@@ -4,6 +4,7 @@ import re
 import sys
 
 import pytest
+from hook_master.providers.codex import powershell_command
 
 from workflowhooker import cli
 from workflowhooker.compaction import COMPACTION_NOTICE_DE
@@ -77,7 +78,7 @@ def test_compaction_snippet_is_narrow_and_idempotent():
     assert len(group["hooks"]) == 1
     hook = group["hooks"][0]
     assert hook["timeout"] == 10
-    assert hook["command"] == hook["commandWindows"]
+    assert hook["commandWindows"] == powershell_command(hook["command"])
     assert hook["command"].endswith("hook-run SessionStart --provider codex")
     assert default == provider.hook_snippet()
     merged = merge_hook_snippets(default, snippet)
@@ -104,3 +105,27 @@ def test_session_start_and_compaction_snippets_do_not_overlap():
     assert len(merged["hooks"]["SessionStart"]) == 2
     assert merge_hook_snippets(merged, provider.compaction_snippet()) == merged
     assert merge_hook_snippets(merged, provider.session_start_snippet()) == merged
+
+
+def test_merge_does_not_duplicate_handlers_registered_before_the_exit_code_wrapper():
+    """A snippet generated with an older hook-master differs only in commandWindows."""
+    provider = CodexProvider()
+    current = provider.hook_snippet()
+    older = json.loads(json.dumps(current))
+    for groups in older["hooks"].values():
+        for group in groups:
+            for handler in group["hooks"]:
+                handler["commandWindows"] = handler["command"]
+    assert older != current
+    merged = merge_hook_snippets(older, current)
+    assert merged == older
+    for groups in merged["hooks"].values():
+        assert sum(len(group["hooks"]) for group in groups) == 1
+
+
+def test_merge_keeps_distinct_handlers_and_windows_only_handlers():
+    first = {"hooks": {"Stop": [{"hooks": [{"commandWindows": "a.exe"}]}]}}
+    second = {"hooks": {"Stop": [{"hooks": [{"commandWindows": "b.exe"}, {"commandWindows": "a.exe"}]}]}}
+    merged = merge_hook_snippets(first, second)
+    commands = [h["commandWindows"] for g in merged["hooks"]["Stop"] for h in g["hooks"]]
+    assert commands == ["a.exe", "b.exe"]
