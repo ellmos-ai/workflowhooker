@@ -221,6 +221,10 @@ def build_shadow_command(
     return shlex.join(argv)
 
 
+def _handler_commands(handler: dict) -> set[str]:
+    return {value for key in ("command", "commandWindows") if (value := handler.get(key))}
+
+
 def merge_hook_snippets(existing: dict, addition: dict) -> dict:
     """Return a hooks-only merge, deduplicating commands within each matcher.
 
@@ -239,12 +243,16 @@ def merge_hook_snippets(existing: dict, addition: dict) -> dict:
         if not isinstance(groups, list):
             raise ValueError("hook event groups must be arrays")
         target_groups = merged["hooks"].setdefault(event, [])
+        # Both command fields count: the generated ``commandWindows`` form can
+        # change between hook-master versions while ``command`` stays the same,
+        # and a handler registered before such a change is still the same hook.
         existing_commands = {
-            (group.get("matcher"), handler.get("commandWindows") or handler.get("command"))
+            (group.get("matcher"), command)
             for group in target_groups
             if isinstance(group, dict)
             for handler in group.get("hooks", [])
             if isinstance(handler, dict)
+            for command in _handler_commands(handler)
         }
         for group in groups:
             if not isinstance(group, dict):
@@ -256,13 +264,11 @@ def merge_hook_snippets(existing: dict, addition: dict) -> dict:
             for handler in handlers:
                 if not isinstance(handler, dict):
                     raise ValueError("hook handler must be an object")
-                command = handler.get("commandWindows") or handler.get("command")
-                signature = (group.get("matcher"), command)
-                if command and signature in existing_commands:
+                signatures = {(group.get("matcher"), command) for command in _handler_commands(handler)}
+                if signatures & existing_commands:
                     continue
                 fresh_handlers.append(deepcopy(handler))
-                if command:
-                    existing_commands.add(signature)
+                existing_commands |= signatures
             if fresh_handlers:
                 fresh_group = deepcopy(group)
                 fresh_group["hooks"] = fresh_handlers
