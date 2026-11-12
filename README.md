@@ -274,7 +274,7 @@ fields, preserving shell-appropriate quoting. For a Windows PowerShell session,
 Keep the POSIX `command` without `&`. The shared hook-master provider adds the
 operator when generating Codex Windows snippets; this also covers the normal,
 session-start and action-guard variants. Codex shadow commands apply the same
-rule. Bare executable names keep their existing form. A changed definition must
+rule. Bare executable names get no `&`; the exit-code wrapper below applies to them too. A changed definition must
 be reviewed again through `/hooks` before Codex runs it.
 
 Generated `commandWindows` entries also keep the native exit code. Codex runs
