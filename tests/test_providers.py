@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from hook_master.providers.codex import powershell_command
 
 from workflowhooker.config import ProvidersConfig
 from workflowhooker.providers import PROVIDER_REGISTRY, resolve_provider
@@ -38,7 +39,7 @@ def test_codex_provider_emits_verified_codex_hook_shape():
     assert set(snippet["hooks"]) == {"Stop", "PreCompact", "UserPromptSubmit"}
     assert "PreToolUse" not in snippet["hooks"]
     command = snippet["hooks"]["Stop"][0]["hooks"][0]
-    assert command["commandWindows"] == command["command"]
+    assert command["commandWindows"] == powershell_command(command["command"])
     assert command["timeout"] == 10
 
 

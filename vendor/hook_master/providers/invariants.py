@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -106,6 +107,31 @@ def validate_interpreter(cmd_or_exe: str | Path) -> Path:
         )
 
     return candidate_path
+
+
+_SCRIPT_ARG = re.compile(r"^[A-Za-z0-9_.:=@+-]+$")
+
+
+def format_script_args(script_args: list[str] | None) -> str:
+    """Trailing arguments of a script hook command, e.g. ``pretooluse --actor codex``.
+
+    Only plain tokens are accepted: the string is pasted into a shell command line, so quotes, spaces,
+    ``;``, ``&``, ``|``, ``$`` or backticks must never get through."""
+    if not script_args:
+        return ""
+    for arg in script_args:
+        if not isinstance(arg, str) or not _SCRIPT_ARG.match(arg):
+            raise ValueError(f"Unzulaessiges Skript-Argument: {arg!r}")
+    return " " + " ".join(script_args)
+
+
+def quote_executable(executable: str) -> str:
+    """Quote an interpreter path that contains whitespace (CLI option parsing strips outer quotes).
+
+    Bare names and paths without whitespace stay as they are, so existing snippets do not change."""
+    if any(char.isspace() for char in executable) and Path(executable).is_file():
+        return f'"{executable}"'
+    return executable
 
 
 def validate_timeout(timeout: int | float | None) -> int:
